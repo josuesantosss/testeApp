@@ -4,7 +4,7 @@
     // ============================================================
     // CONFIGURAÇÃO – Substitua pela sua URL real
     // ============================================================
-    const API_URL = 'https://script.google.com/macros/s/AKfycbzDoNt-58HOvCOqCr2xuXGVuFs4AFjJAiAwuEO3kF82dEmzt8_fq2NNgRPeEbHix2Q-2A/exec';
+    const API_URL = 'https://script.google.com/macros/s/AKfycbxQ0NMpOH4zOnYYd-QvQd3gORdlJMY1e-egwOuDbHQfFt_6kkNsttLmc-3vC1E-4Wc/exec';
 
     // ============================================================
     // SISTEMA DE CACHE
