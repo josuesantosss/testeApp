@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Buscar Telefone de Aluno</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; max-width: 400px; margin: 20px auto; padding: 0 10px; }
+        label { display: block; margin-top: 15px; font-weight: bold; }
+        select, button { width: 100%; padding: 10px; font-size: 16px; margin-top: 5px; }
+        #telefones { margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px; }
+        .telefone-item { padding: 5px 0; font-size: 16px; }
+        .telefone-item a { color: #007bff; text-decoration: none; font-weight: bold; }
+        .telefone-item a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <h2>Buscar Telefone do Aluno</h2>
+
+    <label for="serie">Turma:</label>
+    <select id="serie">
+        <option value="">Carregando...</option>
+    </select>
+
+    <label for="aluno">Aluno:</label>
+    <select id="aluno" disabled>
+        <option value="">Selecione uma turma primeiro</option>
+    </select>
+
+    <div id="telefones">
+        <p>Selecione um aluno para ver os telefones.</p>
+    </div>
+
+    <script>
+        // === CONFIGURAÇÕES (baseado na planilha fornecida) ===
+        const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSvElQdkqUGxgmvpMIWxBkWzm0gMgqsM2SZcAP53TYv6-ftDQ9Up3Bj6TZX5TysYBHvmYIU4u3Z_t7b/pub?gid=1202797417&single=true&output=csv';
+        const COL_TURMA = 0;    // Coluna A
+        const COL_NOME = 1;     // Coluna B
+        const COL_TEL1 = 5;     // Coluna F
+        const COL_TEL2 = 9;     // Coluna J
+        const COL_TEL3 = 13;    // Coluna N
+        const COL_TEL4 = 16;    // Coluna Q
+        // ===============================================
+
+        let dados = [];
+
+        async function carregarDados() {
+            try {
+                const response = await fetch(CSV_URL);
+                const csvText = await response.text();
+                const result = Papa.parse(csvText, { header: false, skipEmptyLines: true });
+                dados = result.data;
+                popularTurmas();
+            } catch (err) {
+                document.getElementById('serie').innerHTML = '<option>Erro ao carregar dados</option>';
+                console.error(err);
+            }
+        }
+
+        function popularTurmas() {
+            const turmas = [...new Set(dados.map(row => row[COL_TURMA]).filter(v => v))];
+            const select = document.getElementById('serie');
+            select.innerHTML = '<option value="">Selecione a turma</option>';
+            turmas.forEach(t => {
+                const opt = document.createElement('option');
+                opt.value = t;
+                opt.textContent = t;
+                select.appendChild(opt);
+            });
+            document.getElementById('aluno').disabled = true;
+        }
+
+        document.getElementById('serie').addEventListener('change', function() {
+            const turmaSelecionada = this.value;
+            const selectAluno = document.getElementById('aluno');
+            const divTel = document.getElementById('telefones');
+
+            if (!turmaSelecionada) {
+                selectAluno.innerHTML = '<option value="">Selecione uma turma primeiro</option>';
+                selectAluno.disabled = true;
+                divTel.innerHTML = '<p>Selecione um aluno para ver os telefones.</p>';
+                return;
+            }
+
+            const alunos = dados
+                .filter(row => row[COL_TURMA] === turmaSelecionada)
+                .map(row => row[COL_NOME])
+                .filter(v => v);
+
+            selectAluno.innerHTML = '<option value="">Selecione um aluno</option>';
+            alunos.forEach(nome => {
+                const opt = document.createElement('option');
+                opt.value = nome;
+                opt.textContent = nome;
+                selectAluno.appendChild(opt);
+            });
+            selectAluno.disabled = false;
+            divTel.innerHTML = '<p>Selecione um aluno para ver os telefones.</p>';
+        });
+
+        // Função auxiliar para criar o link de telefone se ele existir
+        function formatarLinkTelefone(tel) {
+            if (!tel || tel.trim() === '' || tel === '—') {
+                return '—';
+            }
+            // Remove parênteses, espaços e hifens para o link de discagem puro (ex: tel:11999999999)
+            const numeroPuro = tel.replace(/\D/g, '');
+            return `<a href="tel:${numeroPuro}">${tel}</a>`;
+        }
+
+        document.getElementById('aluno').addEventListener('change', function() {
+            const nomeAluno = this.value;
+            const divTel = document.getElementById('telefones');
+
+            if (!nomeAluno) {
+                divTel.innerHTML = '<p>Selecione um aluno para ver os telefones.</p>';
+                return;
+            }
+
+            const aluno = dados.find(row => row[COL_NOME] === nomeAluno && row[COL_TURMA] === document.getElementById('serie').value);
+
+            if (!aluno) {
+                divTel.innerHTML = '<p>Aluno não encontrado.</p>';
+                return;
+            }
+
+            const tel1 = formatarLinkTelefone(aluno[COL_TEL1]);
+            const tel2 = formatarLinkTelefone(aluno[COL_TEL2]);
+            const tel3 = formatarLinkTelefone(aluno[COL_TEL3]);
+            const tel4 = formatarLinkTelefone(aluno[COL_TEL4]);
+
+            divTel.innerHTML = `
+                <h3>${nomeAluno}</h3>
+                <div class="telefone-item"><strong>Telefone 1:</strong> ${tel1}</div>
+                <div class="telefone-item"><strong>Telefone 2:</strong> ${tel2}</div>
+                <div class="telefone-item"><strong>Telefone 3:</strong> ${tel3}</div>
+                <div class="telefone-item"><strong>Telefone 4:</strong> ${tel4}</div>
+            `;
+        });
+
+        carregarDados();
+    </script>
+</body>
+</html>
