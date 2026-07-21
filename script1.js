@@ -357,7 +357,7 @@
                                     ${saudacao},
                                 </p>
                                 <p style="font-size: 32px; margin: 5px 0 0 0; font-weight: 700; text-shadow: 2px 2px 4px rgba(0,0,0,0.2);">
-                                    Roberta! 👋
+                                    Usuário! 👋
                                 </p>
                             </div>
                         </div>
