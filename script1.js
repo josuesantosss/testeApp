@@ -2,9 +2,18 @@
     'use strict';
 
     // ============================================================
-    // CONFIGURAÇÃO – Substitua pela sua URL real
+    // CONFIGURAÇÃO – Substitua pela sua URL real do GAS
     // ============================================================
     const API_URL = 'https://script.google.com/macros/s/AKfycbxQ0NMpOH4zOnYYd-QvQd3gORdlJMY1e-egwOuDbHQfFt_6kkNsttLmc-3vC1E-4Wc/exec';
+
+    // ============================================================
+    // CONFIGURAÇÃO PIX – SUBSTITUA COM SEUS DADOS
+    // ============================================================
+    const PIX_CONFIG = {
+        chave: 'pixdojosue@gmail.com',
+        nomeRecebedor: 'Josue Santos',
+        cidade: 'SP'
+    };
 
     // ============================================================
     // SISTEMA DE CACHE
@@ -12,7 +21,6 @@
     const Cache = {
         data: {},
         timeout: 5 * 60 * 1000,
-
         async get(key, fetchFn) {
             const cached = this.data[key];
             if (cached && Date.now() - cached.timestamp < this.timeout) {
@@ -24,7 +32,6 @@
             this.data[key] = { data, timestamp: Date.now() };
             return data;
         },
-
         clear() {
             this.data = {};
             console.log('🗑️ Cache limpo');
@@ -38,20 +45,10 @@
         const agora = new Date();
         const hora = agora.getHours();
         let saudacao;
-        
-        if (hora >= 5 && hora < 12) {
-            saudacao = 'Bom dia';
-        } else if (hora >= 12 && hora < 18) {
-            saudacao = 'Boa tarde';
-        } else {
-            saudacao = 'Boa noite';
-        }
-        
-        const horario = agora.toLocaleTimeString('pt-BR', { 
-            hour: '2-digit', 
-            minute: '2-digit' 
-        });
-        
+        if (hora >= 5 && hora < 12) saudacao = 'Bom dia';
+        else if (hora >= 12 && hora < 18) saudacao = 'Boa tarde';
+        else saudacao = 'Boa noite';
+        const horario = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
         return { saudacao, horario };
     }
 
@@ -194,6 +191,7 @@
     document.addEventListener('DOMContentLoaded', () => {
         console.log('🚀 Inicializando Sistema de Vendas...');
         adicionarEstilosCSS();
+        bloquearZoom();
         inicializarNavegacao();
         renderHome();
         console.log('✅ Sistema inicializado com sucesso!');
@@ -236,11 +234,7 @@
             if (now - lastTouch <= 300) e.preventDefault();
             lastTouch = now;
         }, { passive: false });
-
-        console.log('🔒 Zoom bloqueado');
     }
-
-    document.addEventListener('DOMContentLoaded', bloquearZoom);
 
     function adicionarEstilosCSS() {
         const style = document.createElement('style');
@@ -264,17 +258,11 @@
             .produto-item:last-child { border-bottom: none; margin-bottom: 0; }
             .valor-pago-container { transition: all 0.3s ease; }
             .valor-pago-container:focus-within { transform: scale(1.02); }
-            .saudacao-card { 
-                animation: slideInRight 0.5s ease;
-                transition: all 0.3s ease;
-            }
-            .saudacao-card:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4) !important;
-            }
-            .btn-processing {
-                animation: pulse 1.5s ease infinite;
-            }
+            .saudacao-card { animation: slideInRight 0.5s ease; transition: all 0.3s ease; }
+            .saudacao-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(102,126,234,0.4) !important; }
+            .btn-processing { animation: pulse 1.5s ease infinite; }
+            .edit-modal { animation: scaleIn 0.2s ease; }
+            .modal-pix { animation: fadeIn 0.3s ease; }
         `;
         document.head.appendChild(style);
     }
@@ -290,7 +278,6 @@
 
                 const pageMap = {
                     'home': renderHome,
-                    'cadastro': renderCadastro,
                     'estoque': renderEstoque,
                     'vendas': renderVendas,
                     'clientes': renderClientes
@@ -306,7 +293,7 @@
 
         document.addEventListener('keydown', (e) => {
             if (e.ctrlKey) {
-                const shortcuts = { '1': 'home', '2': 'cadastro', '3': 'estoque', '4': 'vendas', '5': 'clientes' };
+                const shortcuts = { '1': 'home', '2': 'estoque', '3': 'vendas', '4': 'clientes' };
                 if (shortcuts[e.key]) {
                     e.preventDefault();
                     document.querySelector(`[data-page="${shortcuts[e.key]}"]`)?.click();
@@ -316,53 +303,207 @@
     }
 
     // ============================================================
+    // QR CODE PIX – FUNÇÕES
+    // ============================================================
+    window.gerarQrCodePix = function(valor, descricao = 'Pagamento') {
+        if (!valor || valor <= 0) {
+            mostrarToast('Valor inválido para gerar QR Code', 'error');
+            return;
+        }
+
+        const txid = 'VENDA' + Date.now().toString().slice(-8);
+        const payload = gerarPayloadPix(
+            PIX_CONFIG.chave,
+            PIX_CONFIG.nomeRecebedor,
+            PIX_CONFIG.cidade,
+            valor,
+            descricao,
+            txid
+        );
+
+        mostrarModalPix(payload, valor, descricao);
+    };
+
+    function gerarPayloadPix(chave, nome, cidade, valor, descricao, txid) {
+        chave = chave.trim();
+        nome = removerAcentos(nome.trim()).substring(0, 25);
+        cidade = removerAcentos(cidade.trim()).substring(0, 15);
+        txid = (txid && txid.trim()) ? txid.trim().substring(0, 25) : '***';
+
+        if (!chave) throw new Error('Chave Pix não configurada');
+
+        let payload = '000201';
+        const gui = '0014BR.GOV.BCB.PIX';
+        const chaveLen = String(chave.length).padStart(2, '0');
+        const merchantAccount = gui + '01' + chaveLen + chave;
+        const merchantAccountLen = String(merchantAccount.length).padStart(2, '0');
+        payload += '26' + merchantAccountLen + merchantAccount;
+        payload += '52040000';
+        payload += '5303986';
+        if (valor && valor > 0) {
+            const valorFormatado = valor.toFixed(2);
+            const valorLen = String(valorFormatado.length).padStart(2, '0');
+            payload += '54' + valorLen + valorFormatado;
+        }
+        payload += '5802BR';
+        const nomeLen = String(nome.length).padStart(2, '0');
+        payload += '59' + nomeLen + nome;
+        const cidadeLen = String(cidade.length).padStart(2, '0');
+        payload += '60' + cidadeLen + cidade;
+        const txidValue = '05' + String(txid.length).padStart(2, '0') + txid;
+        const txidLen = String(txidValue.length).padStart(2, '0');
+        payload += '62' + txidLen + txidValue;
+        payload += '6304';
+        const crc = calcularCRC16(payload);
+        const crcHex = crc.toString(16).toUpperCase().padStart(4, '0');
+        payload += crcHex;
+
+        console.log('📤 Payload Pix gerado:', payload);
+        return payload;
+    }
+
+    function removerAcentos(str) {
+        const mapa = {
+            'á': 'a', 'à': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a',
+            'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
+            'í': 'i', 'ì': 'i', 'î': 'i', 'ï': 'i',
+            'ó': 'o', 'ò': 'o', 'ô': 'o', 'õ': 'o', 'ö': 'o',
+            'ú': 'u', 'ù': 'u', 'û': 'u', 'ü': 'u',
+            'ç': 'c', 'ñ': 'n'
+        };
+        return str.replace(/[áàâãäéèêëíìîïóòôõöúùûüçñ]/g, function(match) {
+            return mapa[match] || match;
+        });
+    }
+
+    function calcularCRC16(payload) {
+        const polynomial = 0x1021;
+        let crc = 0xFFFF;
+        for (let i = 0; i < payload.length; i++) {
+            crc ^= payload.charCodeAt(i) << 8;
+            for (let j = 0; j < 8; j++) {
+                if (crc & 0x8000) {
+                    crc = (crc << 1) ^ polynomial;
+                } else {
+                    crc <<= 1;
+                }
+                crc &= 0xFFFF;
+            }
+        }
+        return crc;
+    }
+
+    function mostrarModalPix(payload, valor, descricao) {
+        const modalAnterior = document.querySelector('.modal-pix');
+        if (modalAnterior) modalAnterior.remove();
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-pix';
+        overlay.style.cssText = `
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center;
+            z-index: 10001; animation: fadeIn 0.3s ease;
+            padding: 20px;
+        `;
+
+        const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=${encodeURIComponent(payload)}`;
+
+        overlay.innerHTML = `
+            <div style="background:white; padding:30px; border-radius:16px; max-width:480px; width:100%; box-shadow:0 20px 60px rgba(0,0,0,0.3); animation: scaleIn 0.3s ease; position:relative;">
+                <button onclick="this.closest('.modal-pix').remove()" style="position:absolute; top:10px; right:15px; background:transparent; border:none; font-size:24px; cursor:pointer; color:#999;">✕</button>
+                <div style="text-align:center;">
+                    <div style="display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:10px;">
+                        <span style="font-size:28px;">💳</span>
+                        <h2 style="margin:0; color:#2d3748;">Pagar com Pix</h2>
+                    </div>
+                    <div style="background:#f0f4ff; padding:15px; border-radius:12px; margin-bottom:20px;">
+                        <p style="margin:0; font-size:14px; color:#4a5568;">Valor da compra</p>
+                        <p style="margin:0; font-size:32px; font-weight:bold; color:#667eea;">R$ ${valor.toFixed(2).replace('.', ',')}</p>
+                        ${descricao ? `<p style="margin:5px 0 0 0; font-size:12px; color:#666;">${descricao}</p>` : ''}
+                    </div>
+                    <div style="background:#f8f9fa; padding:15px; border-radius:12px; margin-bottom:15px;">
+                        <img src="${qrCodeUrl}" alt="QR Code Pix" style="width:220px; height:220px; margin:0 auto; display:block; background:white; padding:10px; border-radius:8px; image-rendering:pixelated;">
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button onclick="copiarPix('${payload.replace(/'/g, "\\'")}')" style="flex:1; background:#667eea; color:white; border:none; padding:12px; border-radius:8px; cursor:pointer; font-weight:500;">
+                            📋 Copiar Código Pix
+                        </button>
+                        <button onclick="this.closest('.modal-pix').remove()" style="flex:1; background:#e2e8f0; color:#4a5568; border:none; padding:12px; border-radius:8px; cursor:pointer; font-weight:500;">
+                            Fechar
+                        </button>
+                    </div>
+                    <div style="margin-top:15px; padding:12px; background:#fff3cd; border-radius:8px; font-size:12px; color:#856404;">
+                        ⚠️ Após o pagamento, finalize a compra no sistema.
+                    </div>
+                    <div style="margin-top:10px;">
+                        <button onclick="validarPix('${payload.replace(/'/g, "\\'")}')" style="background:transparent; border:1px solid #667eea; color:#667eea; padding:5px 10px; border-radius:4px; font-size:10px; cursor:pointer;">
+                            🔍 Validar código Pix
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+    }
+
+    function validarPix(payload) {
+        const url = `https://pix.ingressos.etc.br/validador/?pix=${encodeURIComponent(payload)}`;
+        window.open(url, '_blank');
+    }
+
+    function copiarPix(payload) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(payload).then(() => {
+                mostrarToast('✅ Código Pix copiado!', 'success');
+            }).catch(() => {
+                copiarPixFallback(payload);
+            });
+        } else {
+            copiarPixFallback(payload);
+        }
+    }
+
+    function copiarPixFallback(payload) {
+        const textarea = document.createElement('textarea');
+        textarea.value = payload;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            document.execCommand('copy');
+            mostrarToast('✅ Código Pix copiado!', 'success');
+        } catch (e) {
+            mostrarToast('❌ Erro ao copiar. Selecione o código manualmente.', 'error');
+        }
+        document.body.removeChild(textarea);
+    }
+
+    // ============================================================
     // HOME / DASHBOARD
     // ============================================================
     async function renderHome() {
         const app = document.getElementById('app');
         if (!app) return;
-
         const { saudacao, horario } = obterSaudacao();
 
         app.innerHTML = `
             <section>
                 <h2>🏠 Dashboard</h2>
-                
-                <!-- Saudação Personalizada -->
-                <div class="saudacao-card" style="
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    padding: 25px 30px;
-                    border-radius: 15px;
-                    margin-bottom: 25px;
-                    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-                    border: 1px solid rgba(255, 255, 255, 0.2);
-                ">
+                <div class="saudacao-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px 30px; border-radius: 15px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(102,126,234,0.3); border: 1px solid rgba(255,255,255,0.2);">
                     <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px;">
                         <div style="display: flex; align-items: center; gap: 15px;">
-                            <div style="
-                                background: rgba(255, 255, 255, 0.2);
-                                border-radius: 50%;
-                                width: 60px;
-                                height: 60px;
-                                display: flex;
-                                align-items: center;
-                                justify-content: center;
-                                font-size: 30px;
-                            ">
-                                👸🏻
+                            <div style="background: rgba(255,255,255,0.2); border-radius: 50%; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;">
+                                <img src="img/face.png" alt="Face" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">
                             </div>
                             <div>
-                                <p style="font-size: 16px; margin: 0; opacity: 0.9; font-weight: 300; letter-spacing: 0.5px;">
-                                    ${saudacao},
-                                </p>
-                                <p style="font-size: 32px; margin: 5px 0 0 0; font-weight: 700; text-shadow: 2px 2px 4px rgba(0,0,0,0.2);">
-                                    Usuário! 👋
-                                </p>
+                                <p style="font-size: 16px; margin: 0; opacity: 0.9; font-weight: 300; letter-spacing: 0.5px;">${saudacao},</p>
+                                <p style="font-size: 32px; margin: 5px 0 0 0; font-weight: 700; text-shadow: 2px 2px 4px rgba(0,0,0,0.2);">Usuário! 👋</p>
                             </div>
                         </div>
                         <div style="text-align: right;">
-                            <div style="display: flex; align-items: center; gap: 10px; background: rgba(255, 255, 255, 0.15); padding: 15px 20px; border-radius: 12px; backdrop-filter: blur(10px);">
+                            <div style="display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.15); padding: 15px 20px; border-radius: 12px; backdrop-filter: blur(10px);">
                                 <span style="font-size: 28px;">🕐</span>
                                 <div>
                                     <p style="font-size: 12px; margin: 0; opacity: 0.8; text-transform: uppercase; letter-spacing: 1px;">Agora são</p>
@@ -372,7 +513,6 @@
                         </div>
                     </div>
                 </div>
-
                 <div style="text-align:center; padding:40px;">
                     <div class="loading-spinner" style="font-size:32px;">⏳</div>
                     <p style="color:#667eea; margin-top:10px;">Carregando dados...</p>
@@ -386,11 +526,7 @@
                 callAPI('listarVendas', null, false)
             ]);
 
-            let totalProdutos = 0;
-            let valorTotalEstoque = 0;
-            let produtosBaixoEstoque = 0;
-            let produtosEsgotados = 0;
-
+            let totalProdutos = 0, valorTotalEstoque = 0, produtosBaixoEstoque = 0, produtosEsgotados = 0;
             if (produtosResult.success && produtosResult.produtos) {
                 totalProdutos = produtosResult.produtos.length;
                 produtosResult.produtos.forEach(produto => {
@@ -402,9 +538,7 @@
                 });
             }
 
-            let totalVendasHoje = 0;
-            let totalVendasMes = 0;
-            let totalVendasGeral = 0;
+            let totalVendasHoje = 0, totalVendasMes = 0, totalVendasGeral = 0;
             const hoje = new Date();
             const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
 
@@ -418,7 +552,6 @@
                 });
             }
 
-            // Gráfico simples (últimos 7 dias)
             let graficoHTML = '';
             if (vendasResult.success && vendasResult.vendas && vendasResult.vendas.length > 0) {
                 const vendasPorDia = {};
@@ -470,42 +603,19 @@
                             🔄 Atualizar
                         </button>
                     </div>
-
-                    <!-- Saudação Personalizada -->
-                    <div class="saudacao-card" style="
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        color: white;
-                        padding: 25px 30px;
-                        border-radius: 15px;
-                        margin-bottom: 25px;
-                        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-                        border: 1px solid rgba(255, 255, 255, 0.2);
-                    ">
+                    <div class="saudacao-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px 30px; border-radius: 15px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(102,126,234,0.3); border: 1px solid rgba(255,255,255,0.2);">
                         <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px;">
                             <div style="display: flex; align-items: center; gap: 15px;">
-                                <div style="
-                                    background: rgba(255, 255, 255, 0.2);
-                                    border-radius: 50%;
-                                    width: 60px;
-                                    height: 60px;
-                                    display: flex;
-                                    align-items: center;
-                                    justify-content: center;
-                                    font-size: 30px;
-                                ">
-                                    👸🏻
+                                <div style="background: rgba(255,255,255,0.2); border-radius: 50%; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;">
+                                    <img src="img/face.png" alt="Face" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">
                                 </div>
                                 <div>
-                                    <p style="font-size: 16px; margin: 0; opacity: 0.9; font-weight: 300; letter-spacing: 0.5px;">
-                                        ${saudacao},
-                                    </p>
-                                    <p style="font-size: 32px; margin: 5px 0 0 0; font-weight: 700; text-shadow: 2px 2px 4px rgba(0,0,0,0.2);">
-                                        Usuário! 👋
-                                    </p>
+                                    <p style="font-size: 16px; margin: 0; opacity: 0.9; font-weight: 300; letter-spacing: 0.5px;">${saudacao},</p>
+                                    <p style="font-size: 32px; margin: 5px 0 0 0; font-weight: 700; text-shadow: 2px 2px 4px rgba(0,0,0,0.2);">Usuário! 👋</p>
                                 </div>
                             </div>
                             <div style="text-align: right;">
-                                <div style="display: flex; align-items: center; gap: 10px; background: rgba(255, 255, 255, 0.15); padding: 15px 20px; border-radius: 12px; backdrop-filter: blur(10px);">
+                                <div style="display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.15); padding: 15px 20px; border-radius: 12px; backdrop-filter: blur(10px);">
                                     <span style="font-size: 28px;">🕐</span>
                                     <div>
                                         <p style="font-size: 12px; margin: 0; opacity: 0.8; text-transform: uppercase; letter-spacing: 1px;">Agora são</p>
@@ -515,81 +625,48 @@
                             </div>
                         </div>
                     </div>
-
                     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px,1fr)); gap:20px; margin-top:20px;">
                         <div class="card-dashboard" style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:white; padding:25px; border-radius:12px;">
                             <div style="display:flex; justify-content:space-between; align-items:start;">
-                                <div>
-                                    <h3 style="margin:0 0 10px 0; font-size:14px; opacity:0.9;">📦 Total Produtos</h3>
-                                    <p style="font-size:36px; font-weight:bold; margin:0;">${totalProdutos}</p>
-                                </div>
+                                <div><h3 style="margin:0 0 10px 0; font-size:14px; opacity:0.9;">📦 Total Produtos</h3><p style="font-size:36px; font-weight:bold; margin:0;">${totalProdutos}</p></div>
                                 <span style="font-size:32px; opacity:0.5;">📦</span>
                             </div>
                             <small style="opacity:0.8;">Produtos cadastrados</small>
                         </div>
-
                         <div class="card-dashboard" style="background:linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color:white; padding:25px; border-radius:12px;">
                             <div style="display:flex; justify-content:space-between; align-items:start;">
-                                <div>
-                                    <h3 style="margin:0 0 10px 0; font-size:14px; opacity:0.9;">💰 Estoque Total</h3>
-                                    <p style="font-size:36px; font-weight:bold; margin:0;">R$ ${valorTotalEstoque.toFixed(2).replace('.', ',')}</p>
-                                </div>
+                                <div><h3 style="margin:0 0 10px 0; font-size:14px; opacity:0.9;">💰 Estoque Total</h3><p style="font-size:36px; font-weight:bold; margin:0;">R$ ${valorTotalEstoque.toFixed(2).replace('.', ',')}</p></div>
                                 <span style="font-size:32px; opacity:0.5;">💰</span>
                             </div>
                             <small style="opacity:0.8;">Valor total em estoque</small>
                         </div>
-
                         <div class="card-dashboard" style="background:linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color:white; padding:25px; border-radius:12px;">
                             <div style="display:flex; justify-content:space-between; align-items:start;">
-                                <div>
-                                    <h3 style="margin:0 0 10px 0; font-size:14px; opacity:0.9;">💵 Vendas Hoje</h3>
-                                    <p style="font-size:36px; font-weight:bold; margin:0;">R$ ${totalVendasHoje.toFixed(2).replace('.', ',')}</p>
-                                </div>
+                                <div><h3 style="margin:0 0 10px 0; font-size:14px; opacity:0.9;">💵 Vendas Hoje</h3><p style="font-size:36px; font-weight:bold; margin:0;">R$ ${totalVendasHoje.toFixed(2).replace('.', ',')}</p></div>
                                 <span style="font-size:32px; opacity:0.5;">💵</span>
                             </div>
                             <small style="opacity:0.8;">${hoje.toLocaleDateString('pt-BR')}</small>
                         </div>
-
                         <div class="card-dashboard" style="background:linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color:white; padding:25px; border-radius:12px;">
                             <div style="display:flex; justify-content:space-between; align-items:start;">
-                                <div>
-                                    <h3 style="margin:0 0 10px 0; font-size:14px; opacity:0.9;">📊 Vendas do Mês</h3>
-                                    <p style="font-size:36px; font-weight:bold; margin:0;">R$ ${totalVendasMes.toFixed(2).replace('.', ',')}</p>
-                                </div>
+                                <div><h3 style="margin:0 0 10px 0; font-size:14px; opacity:0.9;">📊 Vendas do Mês</h3><p style="font-size:36px; font-weight:bold; margin:0;">R$ ${totalVendasMes.toFixed(2).replace('.', ',')}</p></div>
                                 <span style="font-size:32px; opacity:0.5;">📊</span>
                             </div>
                             <small style="opacity:0.8;">Desde ${inicioMes.toLocaleDateString('pt-BR')}</small>
                         </div>
                     </div>
-
                     ${(produtosBaixoEstoque > 0 || produtosEsgotados > 0) ? `
                         <div style="margin-top:20px; display:grid; grid-template-columns:repeat(auto-fit, minmax(250px,1fr)); gap:15px;">
-                            ${produtosBaixoEstoque > 0 ? `
-                                <div style="padding:15px; background:#fff3cd; border:2px solid #ffc107; border-radius:8px; color:#856404;">
-                                    <strong>⚠️ Atenção:</strong> ${produtosBaixoEstoque} produto(s) com estoque baixo (≤ 5 unidades)
-                                </div>
-                            ` : ''}
-                            ${produtosEsgotados > 0 ? `
-                                <div style="padding:15px; background:#f8d7da; border:2px solid #dc3545; border-radius:8px; color:#721c24;">
-                                    <strong>🔴 Alerta:</strong> ${produtosEsgotados} produto(s) esgotado(s)
-                                </div>
-                            ` : ''}
+                            ${produtosBaixoEstoque > 0 ? `<div style="padding:15px; background:#fff3cd; border:2px solid #ffc107; border-radius:8px; color:#856404;"><strong>⚠️ Atenção:</strong> ${produtosBaixoEstoque} produto(s) com estoque baixo (≤ 5 unidades)</div>` : ''}
+                            ${produtosEsgotados > 0 ? `<div style="padding:15px; background:#f8d7da; border:2px solid #dc3545; border-radius:8px; color:#721c24;"><strong>🔴 Alerta:</strong> ${produtosEsgotados} produto(s) esgotado(s)</div>` : ''}
                         </div>
                     ` : ''}
-
                     ${graficoHTML}
-
                     <div style="margin-top:20px; padding:20px; background:white; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1);">
                         <h3 style="margin:0 0 15px 0;">📈 Resumo Geral</h3>
                         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:15px;">
-                            <div>
-                                <p style="color:#666; margin:0;">Total em Vendas</p>
-                                <p style="font-size:24px; font-weight:bold; color:#667eea; margin:5px 0;">R$ ${totalVendasGeral.toFixed(2).replace('.', ',')}</p>
-                            </div>
-                            <div>
-                                <p style="color:#666; margin:0;">Ticket Médio</p>
-                                <p style="font-size:24px; font-weight:bold; color:#667eea; margin:5px 0;">R$ ${vendasResult.vendas && vendasResult.vendas.length > 0 ? (totalVendasGeral / vendasResult.vendas.length).toFixed(2).replace('.', ',') : '0,00'}</p>
-                            </div>
+                            <div><p style="color:#666; margin:0;">Total em Vendas</p><p style="font-size:24px; font-weight:bold; color:#667eea; margin:5px 0;">R$ ${totalVendasGeral.toFixed(2).replace('.', ',')}</p></div>
+                            <div><p style="color:#666; margin:0;">Ticket Médio</p><p style="font-size:24px; font-weight:bold; color:#667eea; margin:5px 0;">R$ ${vendasResult.vendas && vendasResult.vendas.length > 0 ? (totalVendasGeral / vendasResult.vendas.length).toFixed(2).replace('.', ',') : '0,00'}</p></div>
                         </div>
                     </div>
                 </section>
@@ -597,16 +674,12 @@
 
         } catch (error) {
             app.innerHTML = `
-                <section>
-                    <h2>🏠 Dashboard</h2>
-                    <div style="text-align:center; padding:40px; color:#e53e3e;">
-                        <p style="font-size:48px;">😕</p>
-                        <p>❌ Erro ao carregar dados: ${error.message}</p>
-                        <button onclick="window.renderHome()" class="btn-primary" style="background:#667eea; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; margin-top:10px;">
-                            🔄 Tentar novamente
-                        </button>
-                    </div>
-                </section>
+                <section><h2>🏠 Dashboard</h2>
+                <div style="text-align:center; padding:40px; color:#e53e3e;">
+                    <p style="font-size:48px;">😕</p>
+                    <p>❌ Erro ao carregar dados: ${error.message}</p>
+                    <button onclick="window.renderHome()" class="btn-primary" style="background:#667eea; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; margin-top:10px;">🔄 Tentar novamente</button>
+                </div></section>
             `;
         }
     }
@@ -618,88 +691,44 @@
     };
 
     // ============================================================
-    // CADASTRO DE PRODUTOS (via GET)
-    // ============================================================
-    function renderCadastro() {
-        const app = document.getElementById('app');
-        app.innerHTML = `
-            <section>
-                <h2>➕ Cadastrar Produto</h2>
-                <div style="background:white; padding:30px; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1);">
-                    <form id="formCadastro">
-                        <div style="margin-bottom:20px;">
-                            <label style="display:block; margin-bottom:8px; color:#4a5568; font-weight:500;">Nome do Produto *</label>
-                            <input type="text" id="nome" required style="width:100%; padding:12px; border:2px solid #e2e8f0; border-radius:6px;">
-                        </div>
-                        <div style="margin-bottom:20px;">
-                            <label style="display:block; margin-bottom:8px; color:#4a5568; font-weight:500;">Preço (R$) *</label>
-                            <input type="number" id="preco" step="0.01" required style="width:100%; padding:12px; border:2px solid #e2e8f0; border-radius:6px;">
-                        </div>
-                        <div style="margin-bottom:20px;">
-                            <label style="display:block; margin-bottom:8px; color:#4a5568; font-weight:500;">Quantidade *</label>
-                            <input type="number" id="quantidade" required style="width:100%; padding:12px; border:2px solid #e2e8f0; border-radius:6px;">
-                        </div>
-                        <div style="display:flex; gap:10px;">
-                            <button type="submit" class="btn-primary" style="background:#667eea; color:white; border:none; padding:12px 24px; border-radius:6px; cursor:pointer; font-weight:500; flex:1;">
-                                ✅ Cadastrar Produto
-                            </button>
-                            <button type="button" onclick="document.getElementById('formCadastro').reset(); document.getElementById('msg').innerHTML='';" style="background:#e2e8f0; color:#4a5568; border:none; padding:12px 24px; border-radius:6px; cursor:pointer; font-weight:500;">
-                                🗑️ Limpar
-                            </button>
-                        </div>
-                    </form>
-                    <div id="msg" style="margin-top:20px;"></div>
-                </div>
-            </section>
-        `;
-        document.getElementById('formCadastro').addEventListener('submit', cadastrarProduto);
-    }
-
-    async function cadastrarProduto(e) {
-        e.preventDefault();
-        const nome = document.getElementById('nome').value.trim();
-        const preco = parseFloat(document.getElementById('preco').value);
-        const quantidade = parseInt(document.getElementById('quantidade').value);
-        const msg = document.getElementById('msg');
-
-        if (!nome) {
-            msg.innerHTML = '<div style="padding:12px;background:#fed7d7;color:#9b2c2c;border-radius:6px;">❌ Nome obrigatório</div>';
-            return;
-        }
-        if (isNaN(preco) || preco <= 0) {
-            msg.innerHTML = '<div style="padding:12px;background:#fed7d7;color:#9b2c2c;border-radius:6px;">❌ Preço inválido</div>';
-            return;
-        }
-        if (isNaN(quantidade) || quantidade < 0) {
-            msg.innerHTML = '<div style="padding:12px;background:#fed7d7;color:#9b2c2c;border-radius:6px;">❌ Quantidade inválida</div>';
-            return;
-        }
-
-        const result = await callAPI('cadastrarProduto', { nome, preco, quantidade }, false);
-        if (result.success) {
-            msg.innerHTML = '<div style="padding:12px;background:#c6f6d5;color:#22543d;border-radius:6px;">✅ Produto cadastrado!</div>';
-            mostrarToast(`Produto "${nome}" cadastrado!`, 'success');
-            document.getElementById('formCadastro').reset();
-            Cache.clear();
-        } else {
-            msg.innerHTML = `<div style="padding:12px;background:#fed7d7;color:#9b2c2c;border-radius:6px;">❌ ${result.error}</div>`;
-        }
-    }
-
-    // ============================================================
-    // ESTOQUE (exclusão via GET)
+    // ESTOQUE – COM CADASTRO RÁPIDO E EDIÇÃO CLICÁVEL
     // ============================================================
     async function renderEstoque() {
         const app = document.getElementById('app');
         app.innerHTML = `
             <section>
                 <h2>📦 Estoque</h2>
-                <div style="text-align:center; padding:40px;">
+                <!-- Box de cadastro rápido -->
+                <div style="background:#f0f4ff; padding:20px; border-radius:12px; margin-bottom:20px; border:2px dashed #667eea;">
+                    <h3 style="margin:0 0 15px 0; color:#667eea;">➕ Cadastrar Novo Produto</h3>
+                    <form id="formCadastroRapido" style="display:flex; gap:15px; flex-wrap:wrap; align-items:flex-end;">
+                        <div style="flex:2; min-width:150px;">
+                            <label style="display:block; margin-bottom:5px; color:#4a5568; font-weight:500;">Nome</label>
+                            <input type="text" id="nomeRapido" placeholder="Nome do produto" style="width:100%; padding:10px; border:2px solid #e2e8f0; border-radius:6px;">
+                        </div>
+                        <div style="flex:1; min-width:100px;">
+                            <label style="display:block; margin-bottom:5px; color:#4a5568; font-weight:500;">Preço (R$)</label>
+                            <input type="number" id="precoRapido" step="0.01" placeholder="0,00" style="width:100%; padding:10px; border:2px solid #e2e8f0; border-radius:6px;">
+                        </div>
+                        <div style="flex:1; min-width:100px;">
+                            <label style="display:block; margin-bottom:5px; color:#4a5568; font-weight:500;">Quantidade</label>
+                            <input type="number" id="qtdRapido" placeholder="0" style="width:100%; padding:10px; border:2px solid #e2e8f0; border-radius:6px;">
+                        </div>
+                        <button type="submit" style="background:#667eea; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:500; height:42px;">
+                            ✅ Cadastrar
+                        </button>
+                    </form>
+                    <div id="msgCadastroRapido" style="margin-top:10px;"></div>
+                </div>
+
+                <div style="text-align:center; padding:20px;">
                     <div class="loading-spinner" style="font-size:32px;">⏳</div>
                     <p style="color:#667eea;">Carregando produtos...</p>
                 </div>
             </section>
         `;
+
+        document.getElementById('formCadastroRapido').addEventListener('submit', cadastrarProdutoRapido);
 
         try {
             const result = await callAPI('listarProdutos');
@@ -711,47 +740,62 @@
                     const status = qtd === 0 ? '🔴' : qtd <= 5 ? '🟡' : '🟢';
                     const statusTexto = qtd === 0 ? 'Esgotado' : qtd <= 5 ? 'Baixo' : 'Normal';
                     html += `
-                        <tr style="${qtd === 0 ? 'background:#fff5f5;' : ''}">
+                        <tr onclick="window.abrirEdicaoProduto(${p.id}, '${p.nome.replace(/'/g, "\\'")}', ${preco}, ${qtd})" style="cursor:pointer; ${qtd === 0 ? 'background:#fff5f5;' : ''}">
                             <td>${p.id}</td>
                             <td><strong>${p.nome}</strong></td>
                             <td>${status} ${qtd} <small style="color:#666;">(${statusTexto})</small></td>
                             <td>R$ ${preco.toFixed(2).replace('.', ',')}</td>
-                            <td>R$ ${(preco * qtd).toFixed(2).replace('.', ',')}</td>
-                            <td>
-                                <button onclick="window.confirmarExclusaoProduto(${p.id}, '${p.nome.replace(/'/g, "\\'")}')"
-                                        style="background:#e53e3e; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer; font-size:12px;">
-                                    🗑️ Excluir
-                                </button>
-                            </td>
                         </tr>
                     `;
                 });
             } else {
-                html = `<tr><td colspan="6" style="text-align:center; padding:40px;"><p style="font-size:48px;">📭</p><p style="color:#666;">Nenhum produto cadastrado</p></td></tr>`;
+                html = `<tr><td colspan="4" style="text-align:center; padding:40px;"><p style="font-size:48px;">📭</p><p style="color:#666;">Nenhum produto cadastrado</p></td></tr>`;
             }
 
             app.innerHTML = `
                 <section>
+                    <h2>📦 Estoque</h2>
+                    <!-- Box de cadastro rápido -->
+                    <div style="background:#f0f4ff; padding:20px; border-radius:12px; margin-bottom:20px; border:2px dashed #667eea;">
+                        <h3 style="margin:0 0 15px 0; color:#667eea;">➕ Cadastrar Novo Produto</h3>
+                        <form id="formCadastroRapido" style="display:flex; gap:15px; flex-wrap:wrap; align-items:flex-end;">
+                            <div style="flex:2; min-width:150px;">
+                                <label style="display:block; margin-bottom:5px; color:#4a5568; font-weight:500;">Nome</label>
+                                <input type="text" id="nomeRapido" placeholder="Nome do produto" style="width:100%; padding:10px; border:2px solid #e2e8f0; border-radius:6px;">
+                            </div>
+                            <div style="flex:1; min-width:100px;">
+                                <label style="display:block; margin-bottom:5px; color:#4a5568; font-weight:500;">Preço (R$)</label>
+                                <input type="number" id="precoRapido" step="0.01" placeholder="0,00" style="width:100%; padding:10px; border:2px solid #e2e8f0; border-radius:6px;">
+                            </div>
+                            <div style="flex:1; min-width:100px;">
+                                <label style="display:block; margin-bottom:5px; color:#4a5568; font-weight:500;">Quantidade</label>
+                                <input type="number" id="qtdRapido" placeholder="0" style="width:100%; padding:10px; border:2px solid #e2e8f0; border-radius:6px;">
+                            </div>
+                            <button type="submit" style="background:#667eea; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:500; height:42px;">
+                                ✅ Cadastrar
+                            </button>
+                        </form>
+                        <div id="msgCadastroRapido" style="margin-top:10px;"></div>
+                    </div>
+
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                        <h2>📦 Estoque</h2>
+                        <div style="display:flex; gap:15px; align-items:center; flex-wrap:wrap;">
+                            <span style="font-size:14px;">🟢 Normal | 🟡 Baixo (≤5) | 🔴 Esgotado</span>
+                            <span style="font-size:12px; color:#666;">💡 Clique em qualquer linha para editar/excluir</span>
+                        </div>
                         <button onclick="window.renderEstoque()" class="btn-primary" style="background:#667eea; color:white; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-weight:500;">
                             🔄 Atualizar
                         </button>
-                    </div>
-                    <div style="margin-bottom:15px; display:flex; gap:15px; align-items:center; flex-wrap:wrap;">
-                        <span style="font-size:14px;">🟢 Normal | 🟡 Baixo (≤5) | 🔴 Esgotado</span>
                     </div>
                     <div style="background:white; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1); overflow:hidden;">
                         <div style="overflow-x:auto;">
                             <table style="width:100%; border-collapse:collapse;">
                                 <thead>
-                                    <tr style="background:#f7fafc; border-bottom:2px solid #e2e8f0;">
-                                        <th style="padding:12px; text-align:left;">ID</th>
-                                        <th style="padding:12px; text-align:left;">Produto</th>
-                                        <th style="padding:12px; text-align:left;">Quantidade</th>
-                                        <th style="padding:12px; text-align:left;">Preço Unit.</th>
-                                        <th style="padding:12px; text-align:left;">Valor Total</th>
-                                        <th style="padding:12px; text-align:center;">Ações</th>
+                                    <tr style="background:#3957ed; border-bottom:2px solid #e2e8f0;">
+                                        <th style="padding:12px; text-align:left; color:white;">ID</th>
+                                        <th style="padding:12px; text-align:left; color:white;">Produto</th>
+                                        <th style="padding:12px; text-align:left; color:white;">Quantidade</th>
+                                        <th style="padding:12px; text-align:left; color:white;">Preço Unit.</th>
                                     </tr>
                                 </thead>
                                 <tbody>${html}</tbody>
@@ -760,10 +804,105 @@
                     </div>
                 </section>
             `;
+
+            document.getElementById('formCadastroRapido').addEventListener('submit', cadastrarProdutoRapido);
+
         } catch (error) {
             app.innerHTML = `<section><h2>📦 Estoque</h2><p style="color:red;">❌ Erro: ${error.message}</p></section>`;
         }
     }
+
+    async function cadastrarProdutoRapido(e) {
+        e.preventDefault();
+        const nome = document.getElementById('nomeRapido').value.trim();
+        const preco = parseFloat(document.getElementById('precoRapido').value);
+        const quantidade = parseInt(document.getElementById('qtdRapido').value);
+        const msg = document.getElementById('msgCadastroRapido');
+        if (!nome) {
+            msg.innerHTML = '<div style="color:#e53e3e;">Nome obrigatório</div>';
+            return;
+        }
+        if (isNaN(preco) || preco < 0) {
+            msg.innerHTML = '<div style="color:#e53e3e;">Preço inválido</div>';
+            return;
+        }
+        if (isNaN(quantidade) || quantidade < 0) {
+            msg.innerHTML = '<div style="color:#e53e3e;">Quantidade inválida</div>';
+            return;
+        }
+        const result = await callAPI('cadastrarProduto', { nome, preco, quantidade }, false);
+        if (result.success) {
+            msg.innerHTML = '<div style="color:#38a169;">✅ Produto cadastrado!</div>';
+            mostrarToast(`Produto "${nome}" cadastrado!`, 'success');
+            document.getElementById('formCadastroRapido').reset();
+            Cache.clear();
+            renderEstoque();
+        } else {
+            msg.innerHTML = `<div style="color:#e53e3e;">${result.error}</div>`;
+        }
+    }
+
+    // ============================================================
+    // EDIÇÃO DE PRODUTO (MODAL com botão Excluir)
+    // ============================================================
+    window.abrirEdicaoProduto = function(id, nome, preco, quantidade) {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed; top:0; left:0; right:0; bottom:0;
+            background: rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center;
+            z-index: 9999; animation: fadeIn 0.2s ease;
+        `;
+        overlay.innerHTML = `
+            <div class="edit-modal" style="background:white; padding:30px; border-radius:12px; max-width:400px; width:90%; box-shadow:0 10px 25px rgba(0,0,0,0.2); animation: scaleIn 0.2s ease;">
+                <h3 style="margin-top:0;">✏️ Editar Produto</h3>
+                <p><strong>${nome}</strong> (ID: ${id})</p>
+                <div style="margin-bottom:15px;">
+                    <label style="display:block; margin-bottom:5px; color:#4a5568; font-weight:500;">Preço (R$)</label>
+                    <input type="number" id="editPreco" step="0.01" value="${preco.toFixed(2)}" style="width:100%; padding:10px; border:2px solid #e2e8f0; border-radius:6px;">
+                </div>
+                <div style="margin-bottom:15px;">
+                    <label style="display:block; margin-bottom:5px; color:#4a5568; font-weight:500;">Quantidade</label>
+                    <input type="number" id="editQuantidade" value="${quantidade}" style="width:100%; padding:10px; border:2px solid #e2e8f0; border-radius:6px;">
+                </div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button id="btnSalvarEdicao" style="flex:1; background:#48bb78; color:white; border:none; padding:12px; border-radius:6px; cursor:pointer; font-weight:500;">💾 Salvar</button>
+                    <button id="btnExcluirEdicao" style="flex:1; background:#e53e3e; color:white; border:none; padding:12px; border-radius:6px; cursor:pointer; font-weight:500;">🗑️ Excluir</button>
+                    <button id="btnCancelarEdicao" style="flex:1; background:#e2e8f0; color:#4a5568; border:none; padding:12px; border-radius:6px; cursor:pointer; font-weight:500;">Cancelar</button>
+                </div>
+                <div id="msgEdicao" style="margin-top:15px;"></div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('#btnSalvarEdicao').onclick = async () => {
+            const novoPreco = parseFloat(overlay.querySelector('#editPreco').value);
+            const novaQuantidade = parseInt(overlay.querySelector('#editQuantidade').value);
+            if (isNaN(novoPreco) || novoPreco < 0) {
+                overlay.querySelector('#msgEdicao').innerHTML = '<div style="color:#e53e3e;">Preço inválido</div>';
+                return;
+            }
+            if (isNaN(novaQuantidade) || novaQuantidade < 0) {
+                overlay.querySelector('#msgEdicao').innerHTML = '<div style="color:#e53e3e;">Quantidade inválida</div>';
+                return;
+            }
+            const result = await callAPI('atualizarProduto', { id, preco: novoPreco, quantidade: novaQuantidade }, false);
+            if (result.success) {
+                mostrarToast(`Produto "${nome}" atualizado!`, 'success');
+                overlay.remove();
+                renderEstoque();
+            } else {
+                overlay.querySelector('#msgEdicao').innerHTML = `<div style="color:#e53e3e;">${result.error}</div>`;
+            }
+        };
+
+        overlay.querySelector('#btnExcluirEdicao').onclick = () => {
+            overlay.remove();
+            window.confirmarExclusaoProduto(id, nome);
+        };
+
+        overlay.querySelector('#btnCancelarEdicao').onclick = () => overlay.remove();
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    };
 
     window.confirmarExclusaoProduto = function(id, nome) {
         confirmarAcao(
@@ -788,7 +927,7 @@
     };
 
     // ============================================================
-    // VENDAS – COM VALOR PAGO NA HORA
+    // VENDAS – COM DESCONTO POR PRODUTO E BOTÃO PAGAR COM PIX (CORRIGIDO)
     // ============================================================
     async function renderVendas() {
         const app = document.getElementById('app');
@@ -850,7 +989,7 @@
                                 </div>
                             </div>
 
-                            <!-- Produtos (4 linhas) -->
+                            <!-- Produtos (4 linhas) com Desconto -->
                             <div id="produtosContainer">
                                 ${[1,2,3,4].map(i => `
                                     <div class="produto-item" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
@@ -863,6 +1002,17 @@
                                         <div style="flex:1; min-width:80px;">
                                             <label style="font-size:14px; color:#4a5568;">Qtd</label>
                                             <input type="number" id="qtd${i}" class="qtd-produto" min="0" value="0" style="width:100%; padding:10px; border:2px solid #e2e8f0; border-radius:6px;">
+                                        </div>
+                                        <div style="flex:1.5; min-width:120px;">
+                                            <label style="font-size:14px; color:#4a5568;">Desconto</label>
+                                            <div style="display:flex; gap:5px; align-items:center;">
+                                                <input type="number" id="descValor${i}" class="desc-valor" min="0" step="0.01" placeholder="0" style="flex:1; min-width:60px; padding:10px; border:2px solid #e2e8f0; border-radius:6px;">
+                                                <select id="descTipo${i}" class="desc-tipo" style="padding:10px; border:2px solid #e2e8f0; border-radius:6px; background:white; width:65px;">
+                                                    <option value="%">%</option>
+                                                    <option value="R$">R$</option>
+                                                </select>
+                                            </div>
+                                            <span id="descAplicado${i}" style="font-size:12px; color:#e53e3e; display:block; min-height:18px;"></span>
                                         </div>
                                         <div style="flex:1; min-width:100px;">
                                             <label style="font-size:14px; color:#4a5568;">Subtotal</label>
@@ -890,7 +1040,25 @@
                                 </div>
                             </div>
 
-                            <button type="submit" style="margin-top:20px; background:#48bb78; color:white; border:none; padding:14px 24px; border-radius:8px; cursor:pointer; font-weight:500; width:100%; font-size:16px;">
+                            <!-- Botão Pagar com PIX -->
+                            <button type="button" id="btnMostrarPix" style="margin-top:10px; background:#1a73e8; color:white; border:none; padding:14px 24px; border-radius:8px; cursor:pointer; font-weight:500; width:100%; font-size:16px;">
+                                💳 Pagar com PIX
+                            </button>
+
+                            <!-- Box de Pagamento PIX (inicialmente oculta) -->
+                            <div id="pixBox" style="display:none; margin-top:10px; padding:15px; background:#f0f4ff; border-radius:8px; border:2px solid #667eea;">
+                                <div style="display:flex; flex-direction:column; gap:10px;">
+                                    <label style="font-weight:500; color:#2d3748;">Valor a pagar via Pix</label>
+                                    <input type="number" id="valorPixVenda" step="0.01" min="0" placeholder="Digite o valor" style="width:100%; padding:12px; border:2px solid #667eea; border-radius:6px; font-size:16px;">
+                                    <div style="display:flex; gap:10px;">
+                                        <button type="button" id="btnGerarPix" style="flex:1; background:#48bb78; color:white; border:none; padding:12px; border-radius:6px; cursor:pointer; font-weight:500;">📱 Gerar QR Code</button>
+                                        <button type="button" id="btnCancelarPix" style="flex:1; background:#e2e8f0; color:#4a5568; border:none; padding:12px; border-radius:6px; cursor:pointer; font-weight:500;">Cancelar</button>
+                                    </div>
+                                    <div id="msgPixVenda" style="margin-top:5px;"></div>
+                                </div>
+                            </div>
+
+                            <button type="submit" style="margin-top:10px; background:#48bb78; color:white; border:none; padding:14px 24px; border-radius:8px; cursor:pointer; font-weight:500; width:100%; font-size:16px;">
                                 💰 Registrar Venda
                             </button>
                         </form>
@@ -899,30 +1067,69 @@
                 </section>
             `;
 
-            // Função para calcular totais e troco
+            // Função para calcular totais, subtotais e descontos
             function calcularTotais() {
                 let totalGeral = 0;
                 for (let i = 1; i <= 4; i++) {
                     const select = document.getElementById(`produto${i}`);
                     const qtdInput = document.getElementById(`qtd${i}`);
                     const subtotalSpan = document.getElementById(`subtotal${i}`);
+                    const descValorInput = document.getElementById(`descValor${i}`);
+                    const descTipoSelect = document.getElementById(`descTipo${i}`);
+                    const descAplicadoSpan = document.getElementById(`descAplicado${i}`);
+
                     const qtd = parseInt(qtdInput.value) || 0;
                     const option = select.options[select.selectedIndex];
                     let subtotal = 0;
-                    if (select.selectedIndex > 0 && option) {
+                    let descontoAplicado = 0;
+                    let descontoTexto = '';
+                    let subtotalFinal = 0;
+
+                    if (select.selectedIndex > 0 && option && qtd > 0) {
                         const preco = parseFloat(option.dataset.preco || 0);
                         subtotal = preco * qtd;
+
+                        const descValor = parseFloat(descValorInput.value) || 0;
+                        const descTipo = descTipoSelect.value;
+
+                        if (descValor > 0) {
+                            if (descTipo === '%') {
+                                descontoAplicado = (subtotal * descValor) / 100;
+                                if (descontoAplicado > subtotal) descontoAplicado = subtotal;
+                                descontoTexto = `-${descValor}% (R$ ${descontoAplicado.toFixed(2).replace('.', ',')})`;
+                            } else {
+                                descontoAplicado = Math.min(descValor, subtotal);
+                                descontoTexto = `- R$ ${descontoAplicado.toFixed(2).replace('.', ',')}`;
+                            }
+                        }
+                        subtotalFinal = subtotal - descontoAplicado;
+                    } else if (select.selectedIndex === 0 || !option) {
+                        subtotalFinal = 0;
+                        descontoTexto = '';
                     }
-                    subtotalSpan.textContent = `R$ ${subtotal.toFixed(2).replace('.', ',')}`;
-                    totalGeral += subtotal;
+
+                    subtotalSpan.textContent = `R$ ${subtotalFinal.toFixed(2).replace('.', ',')}`;
+                    descAplicadoSpan.textContent = descontoTexto;
+                    if (descontoAplicado > 0) {
+                        descAplicadoSpan.style.color = '#e53e3e';
+                    } else {
+                        descAplicadoSpan.textContent = '';
+                    }
+
+                    totalGeral += subtotalFinal;
                 }
                 document.getElementById('totalVenda').textContent = `R$ ${totalGeral.toFixed(2).replace('.', ',')}`;
-                
-                // Calcula troco ou pendente
+
+                // Atualiza campo de valor Pix com o total (sugestão)
+                const valorPixInput = document.getElementById('valorPixVenda');
+                if (valorPixInput && !valorPixInput.value) {
+                    valorPixInput.value = totalGeral.toFixed(2);
+                }
+
                 const valorPago = parseFloat(document.getElementById('valorPago').value) || 0;
                 const troco = valorPago - totalGeral;
                 const trocoSpan = document.getElementById('trocoOuPendente');
-                
+
                 if (troco >= 0) {
                     trocoSpan.textContent = `R$ ${troco.toFixed(2).replace('.', ',')}`;
                     trocoSpan.style.color = '#38a169';
@@ -937,19 +1144,246 @@
             }
 
             // Event listeners
-            document.querySelectorAll('.produto-select, .qtd-produto').forEach(el => {
+            document.querySelectorAll('.produto-select, .qtd-produto, .desc-valor, .desc-tipo').forEach(el => {
                 el.addEventListener('change', calcularTotais);
                 el.addEventListener('input', calcularTotais);
             });
             document.getElementById('valorPago').addEventListener('input', calcularTotais);
 
-            document.getElementById('formVendaMultipla').addEventListener('submit', registrarVendaMultipla);
+            // Lógica do botão Pagar com PIX (CORRIGIDA)
+            const btnMostrarPix = document.getElementById('btnMostrarPix');
+            const pixBox = document.getElementById('pixBox');
+            const btnGerarPix = document.getElementById('btnGerarPix');
+            const btnCancelarPix = document.getElementById('btnCancelarPix');
+            const valorPixInput = document.getElementById('valorPixVenda');
+            const msgPixVenda = document.getElementById('msgPixVenda');
 
+            btnMostrarPix.addEventListener('click', function() {
+                if (pixBox.style.display === 'none') {
+                    const totalSpan = document.getElementById('totalVenda');
+                    const total = parseFloat(totalSpan.textContent.replace('R$ ', '').replace(',', '.')) || 0;
+                    valorPixInput.value = total.toFixed(2);
+                    pixBox.style.display = 'block';
+                    btnMostrarPix.textContent = 'Ocultar Pix';
+                } else {
+                    pixBox.style.display = 'none';
+                    btnMostrarPix.textContent = '💳 Pagar com PIX';
+                }
+            });
+
+            // Cancelar apenas fecha a box, sem qualquer confirmação
+            btnCancelarPix.addEventListener('click', function() {
+                pixBox.style.display = 'none';
+                btnMostrarPix.textContent = '💳 Pagar com PIX';
+                msgPixVenda.innerHTML = '';
+            });
+
+            btnGerarPix.addEventListener('click', function() {
+                const valor = parseFloat(valorPixInput.value);
+                if (isNaN(valor) || valor <= 0) {
+                    msgPixVenda.innerHTML = '<div style="color:#e53e3e;">Valor inválido</div>';
+                    return;
+                }
+                const cliente = document.getElementById('clienteSelect').value || 'Cliente';
+                msgPixVenda.innerHTML = '';
+                gerarQrCodePix(valor, `Venda para ${cliente}`);
+            });
+
+            document.getElementById('formVendaMultipla').addEventListener('submit', registrarVendaMultipla);
             calcularTotais();
 
         } catch (error) {
             app.innerHTML = `<section><h2>💰 Registrar Venda</h2><p style="color:red;">❌ Erro: ${error.message}</p></section>`;
         }
+    }
+
+    // ============================================================
+    // REGISTRAR VENDA MÚLTIPLA (com desconto por produto e QR Code)
+    // ============================================================
+    async function registrarVendaMultipla(e) {
+        e.preventDefault();
+        const cliente = document.getElementById('clienteSelect').value;
+        const msg = document.getElementById('msgVenda');
+        const valorPago = parseFloat(document.getElementById('valorPago').value) || 0;
+        const botaoSubmit = document.querySelector('#formVendaMultipla button[type="submit"]');
+
+        if (!cliente) {
+            msg.innerHTML = '<div style="padding:12px;background:#fed7d7;color:#9b2c2c;border-radius:6px;">❌ Selecione ou cadastre um cliente</div>';
+            return;
+        }
+
+        const itens = [];
+        let totalVenda = 0;
+        let resumoItens = [];
+
+        for (let i = 1; i <= 4; i++) {
+            const select = document.getElementById(`produto${i}`);
+            const qtdInput = document.getElementById(`qtd${i}`);
+            const descValorInput = document.getElementById(`descValor${i}`);
+            const descTipoSelect = document.getElementById(`descTipo${i}`);
+
+            const qtd = parseInt(qtdInput.value) || 0;
+            if (qtd > 0 && select.selectedIndex > 0) {
+                const option = select.options[select.selectedIndex];
+                const produtoId = option.value;
+                const precoOriginal = parseFloat(option.dataset.preco || 0);
+                const nomeProduto = option.dataset.nome || '';
+                const disponivel = parseInt(option.dataset.quantidade || 0);
+
+                if (qtd > disponivel) {
+                    msg.innerHTML = `<div style="padding:12px;background:#fed7d7;color:#9b2c2c;border-radius:6px;">❌ Estoque insuficiente para "${nomeProduto}". Disponível: ${disponivel}</div>`;
+                    return;
+                }
+
+                const subtotal = precoOriginal * qtd;
+                const descValor = parseFloat(descValorInput.value) || 0;
+                const descTipo = descTipoSelect.value;
+                let descontoAplicado = 0;
+
+                if (descValor > 0) {
+                    if (descTipo === '%') {
+                        descontoAplicado = (subtotal * descValor) / 100;
+                        if (descontoAplicado > subtotal) descontoAplicado = subtotal;
+                    } else {
+                        descontoAplicado = Math.min(descValor, subtotal);
+                    }
+                }
+
+                const precoUnitarioFinal = (subtotal - descontoAplicado) / qtd;
+                const totalItem = subtotal - descontoAplicado;
+
+                itens.push({
+                    produtoId,
+                    quantidade: qtd,
+                    precoUnitario: precoUnitarioFinal,
+                    desconto: descontoAplicado,
+                    descontoTipo: descTipo,
+                    descontoValor: descValor
+                });
+
+                totalVenda += totalItem;
+                if (descontoAplicado > 0) {
+                    resumoItens.push(`${qtd}x ${nomeProduto} (desc: ${descValor}${descTipo === '%' ? '%' : 'R$'})`);
+                } else {
+                    resumoItens.push(`${qtd}x ${nomeProduto}`);
+                }
+            }
+        }
+
+        if (itens.length === 0) {
+            msg.innerHTML = '<div style="padding:12px;background:#fed7d7;color:#9b2c2c;border-radius:6px;">❌ Adicione pelo menos um produto com quantidade > 0</div>';
+            return;
+        }
+
+        const troco = valorPago - totalVenda;
+        let mensagemConfirmacao;
+        if (troco >= 0) {
+            mensagemConfirmacao = `Confirmar venda para ${cliente}?<br><br>Itens: ${resumoItens.join(', ')}<br><br>Total com desconto: R$ ${totalVenda.toFixed(2).replace('.', ',')}<br>Valor Pago: R$ ${valorPago.toFixed(2).replace('.', ',')}<br>Troco: R$ ${troco.toFixed(2).replace('.', ',')}`;
+        } else {
+            mensagemConfirmacao = `Confirmar venda para ${cliente}?<br><br>Itens: ${resumoItens.join(', ')}<br><br>Total com desconto: R$ ${totalVenda.toFixed(2).replace('.', ',')}<br>Valor Pago: R$ ${valorPago.toFixed(2).replace('.', ',')}<br>⚠️ Pendente: R$ ${Math.abs(troco).toFixed(2).replace('.', ',')}`;
+        }
+
+        confirmarAcao(
+            mensagemConfirmacao,
+            async () => {
+                try {
+                    const textoOriginal = botaoSubmit.innerHTML;
+                    botaoSubmit.innerHTML = `
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
+                            <span class="loading-spinner" style="font-size: 20px;">⏳</span>
+                            <span>Processando venda...</span>
+                        </div>
+                    `;
+                    botaoSubmit.disabled = true;
+                    botaoSubmit.style.opacity = '0.7';
+                    botaoSubmit.style.cursor = 'not-allowed';
+                    botaoSubmit.classList.add('btn-processing');
+
+                    msg.innerHTML = `
+                        <div style="padding: 15px; background: #e3f2fd; color: #0d47a1; border-radius: 8px; border-left: 4px solid #2196f3;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <span class="loading-spinner" style="font-size: 20px;">⏳</span>
+                                <span>Processando venda para ${cliente}...</span>
+                            </div>
+                        </div>
+                    `;
+
+                    let todasOk = true;
+                    for (const item of itens) {
+                        const result = await callAPI('registrarVenda', {
+                            produtoId: item.produtoId,
+                            quantidade: item.quantidade,
+                            cliente: cliente,
+                            precoUnitario: item.precoUnitario,
+                            desconto: item.desconto,
+                            descontoTipo: item.descontoTipo,
+                            descontoValor: item.descontoValor
+                        }, false);
+                        if (!result.success) {
+                            mostrarToast(`Erro no item: ${result.error}`, 'error');
+                            todasOk = false;
+                            break;
+                        }
+                    }
+
+                    if (todasOk) {
+                        if (valorPago > 0) {
+                            await callAPI('registrarPagamento', {
+                                cliente: cliente,
+                                valor: valorPago,
+                                observacao: `Pagamento da venda de R$ ${totalVenda.toFixed(2)}`
+                            }, false);
+                        }
+
+                        let msgVenda = `
+                            <div style="padding:15px;background:#c6f6d5;color:#22543d;border-radius:6px; animation: slideInRight 0.3s ease;">
+                                <strong>✅ Venda registrada com sucesso!</strong><br>
+                                Cliente: ${cliente}<br>
+                                Total com descontos: R$ ${totalVenda.toFixed(2).replace('.', ',')}<br>
+                                Valor Pago: R$ ${valorPago.toFixed(2).replace('.', ',')}
+                                ${troco >= 0 ? `<br>Troco: R$ ${troco.toFixed(2).replace('.', ',')}` : `<br>⚠️ Pendente: R$ ${Math.abs(troco).toFixed(2).replace('.', ',')}`}
+                            </div>
+                            <div style="margin-top:15px; text-align:center; display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
+                                <button onclick="gerarQrCodePix(${totalVenda}, 'Venda para ${cliente}')" 
+                                        style="background:#1a73e8; color:white; border:none; padding:12px 24px; border-radius:8px; cursor:pointer; font-weight:500; font-size:14px; flex:1; min-width:200px;">
+                                    📱 Gerar QR Code Pix - R$ ${totalVenda.toFixed(2).replace('.', ',')}
+                                </button>
+                                <button onclick="document.getElementById('msgVenda').innerHTML=''" 
+                                        style="background:#667eea; color:white; border:none; padding:12px 24px; border-radius:8px; cursor:pointer; font-weight:500; font-size:14px; flex:1; min-width:200px;">
+                                    ✅ Nova Venda
+                                </button>
+                            </div>
+                        `;
+                        msg.innerHTML = msgVenda;
+                        mostrarToast(`Venda de R$ ${totalVenda.toFixed(2).replace('.', ',')} registrada!`, 'success');
+
+                        document.querySelectorAll('.qtd-produto').forEach(el => el.value = 0);
+                        document.querySelectorAll('.produto-select').forEach(el => el.selectedIndex = 0);
+                        document.querySelectorAll('.desc-valor').forEach(el => el.value = '');
+                        document.querySelectorAll('.desc-tipo').forEach(el => el.selectedIndex = 0);
+                        document.querySelectorAll('#subtotal1, #subtotal2, #subtotal3, #subtotal4').forEach(el => el.textContent = 'R$ 0,00');
+                        document.getElementById('totalVenda').textContent = 'R$ 0,00';
+                        document.getElementById('trocoOuPendente').textContent = 'R$ 0,00';
+                        document.getElementById('valorPago').value = '';
+                        document.querySelectorAll('.desc-aplicado').forEach(el => el.textContent = '');
+                        document.getElementById('qrCodeValor').textContent = '0,00';
+
+                        Cache.clear();
+                        await carregarClientesDropdown();
+                    }
+                } catch (error) {
+                    msg.innerHTML = `<div style="padding:12px;background:#fed7d7;color:#9b2c2c;border-radius:6px;">❌ Erro: ${error.message}</div>`;
+                } finally {
+                    botaoSubmit.innerHTML = '💰 Registrar Venda';
+                    botaoSubmit.disabled = false;
+                    botaoSubmit.style.opacity = '1';
+                    botaoSubmit.style.cursor = 'pointer';
+                    botaoSubmit.classList.remove('btn-processing');
+                }
+            },
+            'Confirmar Venda',
+            'Cancelar'
+        );
     }
 
     // ============================================================
@@ -971,147 +1405,6 @@
             mostrarToast(`Cliente "${nome.trim()}" adicionado!`, 'success');
         }
     };
-
-    // ============================================================
-    // REGISTRAR VENDA MÚLTIPLA (via GET) – COM VALOR PAGO E PROCESSAMENTO
-    // ============================================================
-    async function registrarVendaMultipla(e) {
-        e.preventDefault();
-        const cliente = document.getElementById('clienteSelect').value;
-        const msg = document.getElementById('msgVenda');
-        const valorPago = parseFloat(document.getElementById('valorPago').value) || 0;
-        const botaoSubmit = document.querySelector('#formVendaMultipla button[type="submit"]');
-
-        if (!cliente) {
-            msg.innerHTML = '<div style="padding:12px;background:#fed7d7;color:#9b2c2c;border-radius:6px;">❌ Selecione ou cadastre um cliente</div>';
-            return;
-        }
-
-        const itens = [];
-        let totalVenda = 0;
-        for (let i = 1; i <= 4; i++) {
-            const select = document.getElementById(`produto${i}`);
-            const qtdInput = document.getElementById(`qtd${i}`);
-            const qtd = parseInt(qtdInput.value) || 0;
-            if (qtd > 0 && select.selectedIndex > 0) {
-                const option = select.options[select.selectedIndex];
-                const produtoId = option.value;
-                const preco = parseFloat(option.dataset.preco || 0);
-                const nomeProduto = option.dataset.nome || '';
-                const disponivel = parseInt(option.dataset.quantidade || 0);
-                if (qtd > disponivel) {
-                    msg.innerHTML = `<div style="padding:12px;background:#fed7d7;color:#9b2c2c;border-radius:6px;">❌ Estoque insuficiente para "${nomeProduto}". Disponível: ${disponivel}</div>`;
-                    return;
-                }
-                itens.push({ produtoId, quantidade: qtd, preco, nome: nomeProduto });
-                totalVenda += preco * qtd;
-            }
-        }
-
-        if (itens.length === 0) {
-            msg.innerHTML = '<div style="padding:12px;background:#fed7d7;color:#9b2c2c;border-radius:6px;">❌ Adicione pelo menos um produto com quantidade > 0</div>';
-            return;
-        }
-
-        const troco = valorPago - totalVenda;
-        let mensagemConfirmacao;
-        if (troco >= 0) {
-            mensagemConfirmacao = `Confirmar venda para ${cliente}?<br><br>Itens: ${itens.map(item => `${item.quantidade}x ${item.nome}`).join(', ')}<br><br>Total: R$ ${totalVenda.toFixed(2).replace('.', ',')}<br>Valor Pago: R$ ${valorPago.toFixed(2).replace('.', ',')}<br>Troco: R$ ${troco.toFixed(2).replace('.', ',')}`;
-        } else {
-            mensagemConfirmacao = `Confirmar venda para ${cliente}?<br><br>Itens: ${itens.map(item => `${item.quantidade}x ${item.nome}`).join(', ')}<br><br>Total: R$ ${totalVenda.toFixed(2).replace('.', ',')}<br>Valor Pago: R$ ${valorPago.toFixed(2).replace('.', ',')}<br>⚠️ Pendente: R$ ${Math.abs(troco).toFixed(2).replace('.', ',')}`;
-        }
-
-        confirmarAcao(
-            mensagemConfirmacao,
-            async () => {
-                try {
-                    // Mostra indicador de processamento no botão
-                    const textoOriginal = botaoSubmit.innerHTML;
-                    botaoSubmit.innerHTML = `
-                        <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
-                            <span class="loading-spinner" style="font-size: 20px;">⏳</span>
-                            <span>Processando venda...</span>
-                        </div>
-                    `;
-                    botaoSubmit.disabled = true;
-                    botaoSubmit.style.opacity = '0.7';
-                    botaoSubmit.style.cursor = 'not-allowed';
-                    botaoSubmit.classList.add('btn-processing');
-
-                    // Mostra mensagem de processamento
-                    msg.innerHTML = `
-                        <div style="padding: 15px; background: #e3f2fd; color: #0d47a1; border-radius: 8px; border-left: 4px solid #2196f3;">
-                            <div style="display: flex; align-items: center; gap: 10px;">
-                                <span class="loading-spinner" style="font-size: 20px;">⏳</span>
-                                <span>Processando venda para ${cliente}...</span>
-                            </div>
-                        </div>
-                    `;
-
-                    let todasOk = true;
-                    for (const item of itens) {
-                        const result = await callAPI('registrarVenda', {
-                            produtoId: item.produtoId,
-                            quantidade: item.quantidade,
-                            cliente: cliente,
-                            valorPago: valorPago,
-                            totalVenda: totalVenda
-                        }, false);
-                        if (!result.success) {
-                            mostrarToast(`Erro no item ${item.nome}: ${result.error}`, 'error');
-                            todasOk = false;
-                            break;
-                        }
-                    }
-                    
-                    if (todasOk) {
-                        // Registra pagamento se valor foi pago
-                        if (valorPago > 0) {
-                            await callAPI('registrarPagamento', {
-                                cliente: cliente,
-                                valor: valorPago,
-                                observacao: `Pagamento da venda de R$ ${totalVenda.toFixed(2)}`
-                            }, false);
-                        }
-                        
-                        let msgVenda = `<div style="padding:15px;background:#c6f6d5;color:#22543d;border-radius:6px; animation: slideInRight 0.3s ease;"><strong>✅ Venda registrada com sucesso!</strong><br>Cliente: ${cliente}<br>Total: R$ ${totalVenda.toFixed(2).replace('.', ',')}<br>Valor Pago: R$ ${valorPago.toFixed(2).replace('.', ',')}`;
-                        
-                        if (troco >= 0) {
-                            msgVenda += `<br>Troco: R$ ${troco.toFixed(2).replace('.', ',')}`;
-                        } else {
-                            msgVenda += `<br>⚠️ Pendente: R$ ${Math.abs(troco).toFixed(2).replace('.', ',')}`;
-                        }
-                        
-                        msgVenda += '</div>';
-                        msg.innerHTML = msgVenda;
-                        mostrarToast(`Venda de R$ ${totalVenda.toFixed(2).replace('.', ',')} registrada!`, 'success');
-                        
-                        // Limpa os campos
-                        document.querySelectorAll('.qtd-produto').forEach(el => el.value = 0);
-                        document.querySelectorAll('.produto-select').forEach(el => el.selectedIndex = 0);
-                        document.getElementById('valorPago').value = '';
-                        document.querySelectorAll('#subtotal1, #subtotal2, #subtotal3, #subtotal4').forEach(el => el.textContent = 'R$ 0,00');
-                        document.getElementById('totalVenda').textContent = 'R$ 0,00';
-                        document.getElementById('trocoOuPendente').textContent = 'R$ 0,00';
-                        
-                        Cache.clear();
-                        await carregarClientesDropdown();
-                    }
-                } catch (error) {
-                    msg.innerHTML = `<div style="padding:12px;background:#fed7d7;color:#9b2c2c;border-radius:6px;">❌ Erro: ${error.message}</div>`;
-                } finally {
-                    // Restaura o botão
-                    botaoSubmit.innerHTML = '💰 Registrar Venda';
-                    botaoSubmit.disabled = false;
-                    botaoSubmit.style.opacity = '1';
-                    botaoSubmit.style.cursor = 'pointer';
-                    botaoSubmit.classList.remove('btn-processing');
-                }
-            },
-            'Confirmar Venda',
-            'Cancelar'
-        );
-    }
 
     async function carregarClientesDropdown() {
         const select = document.getElementById('clienteSelect');
@@ -1140,7 +1433,7 @@
     }
 
     // ============================================================
-    // CLIENTES – COM HISTÓRICO DE COMPRAS E PAGAMENTOS
+    // CLIENTES – COM COMPARTILHAMENTO VIA WHATSAPP E PAGAMENTO PIX
     // ============================================================
     async function renderClientes() {
         const app = document.getElementById('app');
@@ -1218,10 +1511,10 @@
                     <table style="width:100%; border-collapse:collapse;">
                         <thead>
                             <tr style="background:#3957ed; border-bottom:2px solid #e2e8f0;">
-                                <th style="padding:12px; text-align:left;">Cliente</th>
-                                <th style="padding:12px; text-align:left;">Total Gasto</th>
-                                <th style="padding:12px; text-align:left;">Total Pago</th>
-                                <th style="padding:12px; text-align:left;">Saldo</th>
+                                <th style="padding:12px; text-align:left; color:white;">Cliente</th>
+                                <th style="padding:12px; text-align:left; color:white;">Total Gasto</th>
+                                <th style="padding:12px; text-align:left; color:white;">Total Pago</th>
+                                <th style="padding:12px; text-align:left; color:white;">Saldo</th>
                             </tr>
                         </thead>
                         <tbody>${html}</tbody>
@@ -1238,6 +1531,9 @@
 
     window.carregarTabelaClientes = carregarTabelaClientes;
 
+    // ============================================================
+    // DETALHES DO CLIENTE – COMPRAS + PAGAMENTOS + WHATSAPP + PIX
+    // ============================================================
     window.mostrarDetalhesCliente = async function(nomeCliente) {
         const container = document.getElementById('detalhesCliente');
         if (!container) return;
@@ -1256,8 +1552,7 @@
                 callAPI('listarVendasPorCliente', null, false)
             ]);
 
-            let totalGasto = 0;
-            let totalPago = 0;
+            let totalGasto = 0, totalPago = 0;
             if (resumoCliente.success && resumoCliente.clientes) {
                 const cliente = resumoCliente.clientes.find(c => c.nome.toLowerCase() === nomeCliente.toLowerCase());
                 if (cliente) {
@@ -1275,17 +1570,28 @@
                 comprasHtml = historicoCompras.historico.map(h => {
                     const data = h.data ? new Date(h.data) : new Date();
                     const dataFormatada = data.toLocaleDateString('pt-BR') + ' ' + data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+                    let nomeProduto = h.produto || '-';
+                    let observacao = '';
+                    const descRegex = /\(desc:\s*(.*?)\)/;
+                    const match = nomeProduto.match(descRegex);
+                    if (match) {
+                        observacao = match[1].trim();
+                        nomeProduto = nomeProduto.replace(descRegex, '').trim();
+                    }
+
                     return `
                         <tr>
                             <td>${dataFormatada}</td>
-                            <td>${h.produto || '-'}</td>
+                            <td>${nomeProduto}</td>
                             <td>${h.quantidade || 1}</td>
                             <td>R$ ${(parseFloat(h.total) || 0).toFixed(2).replace('.', ',')}</td>
+                            <td>${observacao || ''}</td>
                         </tr>
                     `;
                 }).join('');
             } else {
-                comprasHtml = `<tr><td colspan="4" style="text-align:center; padding:20px; color:#666;">Nenhuma compra encontrada</td></tr>`;
+                comprasHtml = `<tr><td colspan="5" style="text-align:center; padding:20px; color:#666;">Nenhuma compra encontrada</td></tr>`;
             }
 
             let pagamentosHtml = '';
@@ -1336,6 +1642,14 @@
                         </div>
                     </div>
 
+                    <!-- Botão Compartilhar WhatsApp -->
+                    <div style="margin-bottom:15px;">
+                        <button onclick="window.compartilharExtrato('${nomeCliente.replace(/'/g, "\\'")}')" style="background:#25D366; color:white; border:none; padding:12px 20px; border-radius:8px; cursor:pointer; font-weight:500; width:100%;">
+                            📱 Compartilhar Extrato via WhatsApp
+                        </button>
+                    </div>
+
+                    <!-- Abas -->
                     <div style="margin-bottom:15px;">
                         <button onclick="window.abrirAba('compras')" id="btnCompras" style="background:#667eea; color:white; border:none; padding:8px 20px; border-radius:6px; cursor:pointer; margin-right:10px;">📦 Compras</button>
                         <button onclick="window.abrirAba('pagamentos')" id="btnPagamentos" style="background:#e2e8f0; color:#4a5568; border:none; padding:8px 20px; border-radius:6px; cursor:pointer;">💳 Pagamentos</button>
@@ -1347,10 +1661,11 @@
                             <table style="width:100%; border-collapse:collapse;">
                                 <thead>
                                     <tr style="background:#3957ed; border-bottom:2px solid #e2e8f0;">
-                                        <th style="padding:10px; text-align:left;">Data</th>
-                                        <th style="padding:10px; text-align:left;">Produto</th>
-                                        <th style="padding:10px; text-align:left;">Qtd</th>
-                                        <th style="padding:10px; text-align:left;">Valor</th>
+                                        <th style="padding:10px; text-align:left; color:white;">Data</th>
+                                        <th style="padding:10px; text-align:left; color:white;">Produto</th>
+                                        <th style="padding:10px; text-align:left; color:white;">Qtd</th>
+                                        <th style="padding:10px; text-align:left; color:white;">Valor</th>
+                                        <th style="padding:10px; text-align:left; color:white;">Observação</th>
                                     </tr>
                                 </thead>
                                 <tbody>${comprasHtml}</tbody>
@@ -1364,9 +1679,9 @@
                             <table style="width:100%; border-collapse:collapse;">
                                 <thead>
                                     <tr style="background:#3957ed; border-bottom:2px solid #e2e8f0;">
-                                        <th style="padding:10px; text-align:left;">Data</th>
-                                        <th style="padding:10px; text-align:left;">Valor</th>
-                                        <th style="padding:10px; text-align:left;">Observação</th>
+                                        <th style="padding:10px; text-align:left; color:white;">Data</th>
+                                        <th style="padding:10px; text-align:left; color:white;">Valor</th>
+                                        <th style="padding:10px; text-align:left; color:white;">Observação</th>
                                     </tr>
                                 </thead>
                                 <tbody>${pagamentosHtml}</tbody>
@@ -1374,8 +1689,9 @@
                         </div>
                     </div>
 
+                    <!-- Bloco Registrar Pagamento -->
                     <div style="padding:20px; background:#f7fafc; border-radius:8px; border:1px solid #e2e8f0; margin-top:20px;">
-                        <h4 style="margin:0 0 15px 0;">💳 Registrar Pagamento</h4>
+                        <h4 style="margin:0 0 15px 0;">💳 Registrar Pagamento (dinheiro/cartão)</h4>
                         <div style="display:flex; gap:10px; flex-wrap:wrap;">
                             <input type="number" id="valorPagamentoDetalhe" placeholder="Valor do pagamento" min="0.01" step="0.01" style="flex:1; padding:12px; border:2px solid #e2e8f0; border-radius:6px; min-width:150px;">
                             <button onclick="window.registrarPagamentoClienteDetalhe('${nomeCliente.replace(/'/g, "\\'")}')" style="background:#48bb78; color:white; border:none; padding:12px 24px; border-radius:6px; cursor:pointer; font-weight:500; white-space:nowrap;">
@@ -1383,6 +1699,18 @@
                             </button>
                         </div>
                         <div id="msgPagamentoDetalhe" style="margin-top:15px;"></div>
+                    </div>
+
+                    <!-- Bloco Pagar via Pix -->
+                    <div style="padding:20px; background:#f0f4ff; border-radius:8px; border:1px solid #667eea; margin-top:20px;">
+                        <h4 style="margin:0 0 15px 0;">📱 Pagar via Pix</h4>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                            <input type="number" id="valorPixCliente" placeholder="Valor a pagar" min="0.01" step="0.01" style="flex:1; padding:12px; border:2px solid #667eea; border-radius:6px; min-width:150px;">
+                            <button onclick="window.gerarPixParaCliente('${nomeCliente.replace(/'/g, "\\'")}')" style="background:#1a73e8; color:white; border:none; padding:12px 24px; border-radius:6px; cursor:pointer; font-weight:500; white-space:nowrap;">
+                                📱 Gerar QR Code Pix
+                            </button>
+                        </div>
+                        <div id="msgPixCliente" style="margin-top:15px;"></div>
                     </div>
                 </div>
             `;
@@ -1402,6 +1730,78 @@
         }
     };
 
+    // ============================================================
+    // GERAR PIX PARA CLIENTE
+    // ============================================================
+    window.gerarPixParaCliente = function(nomeCliente) {
+        const valorInput = document.getElementById('valorPixCliente');
+        const msgDiv = document.getElementById('msgPixCliente');
+        if (!valorInput || !msgDiv) return;
+
+        const valor = parseFloat(valorInput.value);
+        if (isNaN(valor) || valor <= 0) {
+            msgDiv.innerHTML = '<div style="padding:10px;background:#fed7d7;color:#9b2c2c;border-radius:4px;">❌ Informe um valor válido</div>';
+            return;
+        }
+
+        msgDiv.innerHTML = '';
+        gerarQrCodePix(valor, `Pagamento de ${nomeCliente}`);
+    };
+
+    // ============================================================
+    // COMPARTILHAR EXTRATO VIA WHATSAPP
+    // ============================================================
+    window.compartilharExtrato = async function(nomeCliente) {
+        try {
+            const [historicoCompras, historicoPagamentos, resumoCliente] = await Promise.all([
+                callAPI('listarDetalhesCliente', { cliente: nomeCliente }, false),
+                callAPI('listarPagamentosPorCliente', { cliente: nomeCliente }, false),
+                callAPI('listarVendasPorCliente', null, false)
+            ]);
+            let totalGasto = 0, totalPago = 0;
+            if (resumoCliente.success && resumoCliente.clientes) {
+                const cliente = resumoCliente.clientes.find(c => c.nome.toLowerCase() === nomeCliente.toLowerCase());
+                if (cliente) {
+                    totalGasto = parseFloat(cliente.totalGasto) || 0;
+                    totalPago = parseFloat(cliente.totalPago) || 0;
+                }
+            }
+            const saldo = totalGasto - totalPago;
+            let texto = `📋 EXTRATO DO CLIENTE\n\n`;
+            texto += `👤 Nome: ${nomeCliente}\n`;
+            texto += `💰 Total Gasto: R$ ${totalGasto.toFixed(2).replace('.', ',')}\n`;
+            texto += `💵 Total Pago: R$ ${totalPago.toFixed(2).replace('.', ',')}\n`;
+            texto += `📊 Saldo: R$ ${Math.abs(saldo).toFixed(2).replace('.', ',')} (${saldo > 0 ? 'A pagar' : saldo < 0 ? 'Crédito' : 'Quitado'})\n\n`;
+            texto += `🛒 COMPRAS:\n`;
+            if (historicoCompras.success && historicoCompras.historico && historicoCompras.historico.length > 0) {
+                historicoCompras.historico.forEach(h => {
+                    const data = h.data ? new Date(h.data) : new Date();
+                    const dataStr = data.toLocaleDateString('pt-BR');
+                    texto += `- ${dataStr}: ${h.produto} (${h.quantidade}x) = R$ ${(parseFloat(h.total)||0).toFixed(2).replace('.', ',')}\n`;
+                });
+            } else {
+                texto += `Nenhuma compra encontrada.\n`;
+            }
+            texto += `\n💳 PAGAMENTOS:\n`;
+            if (historicoPagamentos.success && historicoPagamentos.pagamentos && historicoPagamentos.pagamentos.length > 0) {
+                historicoPagamentos.pagamentos.forEach(p => {
+                    const data = p.data ? new Date(p.data) : new Date();
+                    const dataStr = data.toLocaleDateString('pt-BR');
+                    texto += `- ${dataStr}: R$ ${(parseFloat(p.valor)||0).toFixed(2).replace('.', ',')} (${p.observacao || '-'})\n`;
+                });
+            } else {
+                texto += `Nenhum pagamento encontrado.\n`;
+            }
+            const url = `https://wa.me/?text=${encodeURIComponent(texto)}`;
+            window.open(url, '_blank');
+        } catch (error) {
+            mostrarToast('Erro ao gerar extrato: ' + error.message, 'error');
+        }
+    };
+
+    // ============================================================
+    // REGISTRAR PAGAMENTO (dentro dos detalhes do cliente)
+    // ============================================================
     window.registrarPagamentoClienteDetalhe = async function(nomeCliente) {
         const valorInput = document.getElementById('valorPagamentoDetalhe');
         const msgDiv = document.getElementById('msgPagamentoDetalhe');
@@ -1442,7 +1842,6 @@
     // EXPORTA FUNÇÕES GLOBAIS
     // ============================================================
     window.renderHome = renderHome;
-    window.renderCadastro = renderCadastro;
     window.renderEstoque = renderEstoque;
     window.renderVendas = renderVendas;
     window.renderClientes = renderClientes;
@@ -1451,6 +1850,12 @@
     window.confirmarAcao = confirmarAcao;
     window.mostrarDetalhesCliente = window.mostrarDetalhesCliente;
     window.cadastrarNovoCliente = window.cadastrarNovoCliente;
+    window.abrirEdicaoProduto = window.abrirEdicaoProduto;
+    window.confirmarExclusaoProduto = window.confirmarExclusaoProduto;
+    window.registrarPagamentoClienteDetalhe = window.registrarPagamentoClienteDetalhe;
+    window.compartilharExtrato = window.compartilharExtrato;
+    window.gerarQrCodePix = gerarQrCodePix;
+    window.gerarPixParaCliente = window.gerarPixParaCliente;
 
-    console.log('🚀 Sistema de Vendas v3.4 – Completo com processamento visual de vendas');
+    console.log('🚀 Sistema de Vendas v5.2 – Pagamento Pix com botão e valor personalizado (corrigido)');
 })();
